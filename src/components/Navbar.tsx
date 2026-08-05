@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { User } from '../types';
 import { ShieldCheck, LogOut, Search, Bell, Sparkles, User as UserIcon, Menu, X, AlertCircle } from 'lucide-react';
-
+import ThemeToggle from './ThemeToggle';
 interface NavbarProps {
   user: User | null;
   activeTab: string;
@@ -157,7 +157,18 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
         )}
       </div>
-
+    export function Navbar() {
+    return (
+    <nav className="flex items-center justify-between p-4 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
+      <div className="font-bold text-gray-900 dark:text-white">IET CONNECT</div>
+      
+      <div className="flex items-center space-x-4">
+        {/* Render ThemeToggle here */}
+        <ThemeToggle />
+      </div>
+    </nav>
+  );
+}
       {/* Floating navigation error block */}
       {navError && (
         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-rose-50 border border-rose-200 text-rose-700 px-4 py-3 rounded-2xl text-xs font-semibold flex items-center gap-2.5 shadow-lg max-w-md w-full animate-fadeIn">
