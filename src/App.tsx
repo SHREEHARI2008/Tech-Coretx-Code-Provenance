@@ -321,7 +321,9 @@ export default function App() {
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
       />
-
+      <div className="min-h-screen bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">
+  {/* Your page content */}
+</div>
       {/* Main Body */}
       <div className="flex flex-1 relative">
         <Sidebar
