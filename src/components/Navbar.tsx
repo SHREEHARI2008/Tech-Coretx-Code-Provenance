@@ -1,5 +1,12 @@
 import React, { useState } from 'react';
 import { User, Event, Project, Opportunity, Resource } from '../types';
+import {
+  FALLBACK_MEMBERS,
+  FALLBACK_EVENTS,
+  FALLBACK_PROJECTS,
+  FALLBACK_OPPORTUNITIES,
+  FALLBACK_RESOURCES,
+} from '../fallbackData';
 import { ShieldCheck, LogOut, Search, Bell, Sparkles, User as UserIcon, Menu, X, AlertCircle, Sun, Moon, Calendar, FolderGit2, Briefcase, BookOpen, Users } from 'lucide-react';
 
 interface NavbarProps {
@@ -46,12 +53,53 @@ export const Navbar: React.FC<NavbarProps> = ({
     setShowSearchDropdown(false);
   };
 
+  const activeProjects = projects.length > 0 ? projects : FALLBACK_PROJECTS;
+  const activeEvents = events.length > 0 ? events : FALLBACK_EVENTS;
+  const activeOpps = opportunities.length > 0 ? opportunities : FALLBACK_OPPORTUNITIES;
+  const activeRes = resources.length > 0 ? resources : FALLBACK_RESOURCES;
+  const activeMembers = members.length > 0 ? members : FALLBACK_MEMBERS;
+
+  const q = searchQuery.toLowerCase().trim();
+
   // Instant Multi-category Global Search Results
-  const matchedProjects = searchQuery ? projects.filter(p => p.title.toLowerCase().includes(searchQuery.toLowerCase()) || p.domain.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 2) : [];
-  const matchedEvents = searchQuery ? events.filter(e => e.title.toLowerCase().includes(searchQuery.toLowerCase()) || e.category.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 2) : [];
-  const matchedOpps = searchQuery ? opportunities.filter(o => o.title.toLowerCase().includes(searchQuery.toLowerCase()) || o.companyOrOrg.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 2) : [];
-  const matchedRes = searchQuery ? resources.filter(r => r.title.toLowerCase().includes(searchQuery.toLowerCase()) || r.category.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 2) : [];
-  const matchedMembers = searchQuery ? members.filter(m => m.username.toLowerCase().includes(searchQuery.toLowerCase()) || m.institution.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 2) : [];
+  const matchedProjects = q ? activeProjects.filter(p =>
+    p.title.toLowerCase().includes(q) ||
+    p.domain.toLowerCase().includes(q) ||
+    p.description.toLowerCase().includes(q) ||
+    p.authorName.toLowerCase().includes(q) ||
+    (p.tags && p.tags.some(t => t.toLowerCase().includes(q)))
+  ).slice(0, 3) : [];
+
+  const matchedEvents = q ? activeEvents.filter(e =>
+    e.title.toLowerCase().includes(q) ||
+    e.category.toLowerCase().includes(q) ||
+    e.description.toLowerCase().includes(q) ||
+    (e.tags && e.tags.some(t => t.toLowerCase().includes(q)))
+  ).slice(0, 3) : [];
+
+  const matchedOpps = q ? activeOpps.filter(o =>
+    o.title.toLowerCase().includes(q) ||
+    o.companyOrOrg.toLowerCase().includes(q) ||
+    o.type.toLowerCase().includes(q) ||
+    o.description.toLowerCase().includes(q) ||
+    (o.tags && o.tags.some(t => t.toLowerCase().includes(q)))
+  ).slice(0, 3) : [];
+
+  const matchedRes = q ? activeRes.filter(r =>
+    r.title.toLowerCase().includes(q) ||
+    r.category.toLowerCase().includes(q) ||
+    r.type.toLowerCase().includes(q) ||
+    r.description.toLowerCase().includes(q) ||
+    (r.tags && r.tags.some(t => t.toLowerCase().includes(q)))
+  ).slice(0, 3) : [];
+
+  const matchedMembers = q ? activeMembers.filter(m =>
+    m.username.toLowerCase().includes(q) ||
+    m.email.toLowerCase().includes(q) ||
+    m.institution.toLowerCase().includes(q) ||
+    m.city.toLowerCase().includes(q) ||
+    (m.skills && m.skills.some(s => s.toLowerCase().includes(q)))
+  ).slice(0, 3) : [];
 
   const hasAnyMatches = matchedProjects.length > 0 || matchedEvents.length > 0 || matchedOpps.length > 0 || matchedRes.length > 0 || matchedMembers.length > 0;
 
