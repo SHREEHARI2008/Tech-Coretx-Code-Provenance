@@ -1,6 +1,67 @@
 @import "tailwindcss";
 
-@variant dark (&:where(.dark, .dark *));
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-900 transition-colors duration-200;
+  }
+
+  html.dark body {
+    @apply bg-slate-950 text-slate-100;
+  }
+}
+
+/* Glassmorphism & Custom Glow Effects */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.glass-badge {
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.glow-purple {
+  box-shadow: 0 0 25px rgba(155, 81, 224, 0.5), 0 0 50px rgba(98, 37, 105, 0.3);
+}
+
+.glow-input:focus-within {
+  box-shadow: 0 0 18px rgba(168, 85, 247, 0.45);
+}
+
+/* Ambient Floating Particle Orbs */
+@keyframes floatOrb1 {
+  0%, 100% { transform: translate(0px, 0px) scale(1); }
+  50% { transform: translate(25px, -30px) scale(1.15); }
+}
+
+@keyframes floatOrb2 {
+  0%, 100% { transform: translate(0px, 0px) scale(1); }
+  50% { transform: translate(-30px, 20px) scale(1.1); }
+}
+
+@keyframes floatOrb3 {
+  0%, 100% { transform: translate(0px, 0px) scale(1); }
+  50% { transform: translate(20px, 35px) scale(0.95); }
+}
+
+.animate-orb-1 {
+  animation: floatOrb1 12s ease-in-out infinite;
+}
+
+.animate-orb-2 {
+  animation: floatOrb2 16s ease-in-out infinite;
+}
+
+.animate-orb-3 {
+  animation: floatOrb3 14s ease-in-out infinite;
+}
 
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(8px); }
