@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { User, Event, Project, Announcement, Opportunity, Resource } from '../src/types.js';
+import { User, Event, Project, Announcement, Opportunity, Resource, ActivityLog } from '../src/types.js';
 
 interface DatabaseSchema {
   users: (User & { passwordHash: string })[];
@@ -9,6 +9,7 @@ interface DatabaseSchema {
   announcements: Announcement[];
   opportunities: Opportunity[];
   resources: Resource[];
+  activityLogs: ActivityLog[];
 }
 
 const DATA_DIR = path.join(process.cwd(), 'data');
@@ -468,6 +469,28 @@ const INITIAL_DATA: DatabaseSchema = {
       date: '2026-07-25',
       pinned: false
     }
+  ],
+  activityLogs: [
+    {
+      id: 'act_1',
+      userId: 'usr_demo',
+      username: 'Venkat NS',
+      userEmail: 'venkatns2008@gmail.com',
+      userRole: 'lead',
+      action: 'SYSTEM_BOOT',
+      details: 'IET CONNECT Member Portal initialized with full CRUD & security logging.',
+      timestamp: new Date().toISOString()
+    },
+    {
+      id: 'act_2',
+      userId: 'usr_sarah',
+      username: 'Sarah Chen',
+      userEmail: 'sarah.chen@iet.org',
+      userRole: 'member',
+      action: 'USER_LOGIN',
+      details: 'Signed into IET CONNECT Portal via SRM Chapter Node.',
+      timestamp: new Date(Date.now() - 3600000).toISOString()
+    }
   ]
 };
 
@@ -485,14 +508,15 @@ export function initDb(): DatabaseSchema {
   try {
     const raw = fs.readFileSync(DB_FILE, 'utf-8');
     const parsed = JSON.parse(raw);
-    // Ensure all modules exist and merge any missing seed data for opportunities/resources
+    if (!parsed.activityLogs) {
+      parsed.activityLogs = INITIAL_DATA.activityLogs;
+    }
     if (!parsed.opportunities || parsed.opportunities.length === 0) {
       parsed.opportunities = INITIAL_DATA.opportunities;
     }
     if (!parsed.resources || parsed.resources.length === 0) {
       parsed.resources = INITIAL_DATA.resources;
     }
-    // Also ensure events & projects have our rich past/present/future seed items if missing
     const existingEventIds = new Set(parsed.events.map((e: Event) => e.id));
     INITIAL_DATA.events.forEach(evt => {
       if (!existingEventIds.has(evt.id)) {
@@ -525,4 +549,3 @@ export function saveDb(data: DatabaseSchema): void {
     console.error('Failed to save db.json', err);
   }
 }
-

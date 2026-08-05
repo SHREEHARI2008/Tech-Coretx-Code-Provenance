@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Calendar, FolderGit2, Users, User, Megaphone, LogOut, Award, Briefcase, BookOpen, Sun, Moon } from 'lucide-react';
+import { LayoutDashboard, Calendar, FolderGit2, Users, User, Megaphone, LogOut, Award, Briefcase, BookOpen, Sun, Moon, ShieldCheck, Activity } from 'lucide-react';
 import { User as UserType } from '../types';
 
 interface SidebarProps {
@@ -19,6 +19,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   darkMode = false,
   setDarkMode,
 }) => {
+  const isAdminOrLead = user?.role === 'lead' || user?.role === 'admin';
+
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'events', label: 'Events & Workshops', icon: Calendar },
@@ -28,6 +30,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'members', label: 'Member Directory', icon: Users },
     { id: 'announcements', label: 'Announcements', icon: Megaphone },
     { id: 'profile', label: 'My Profile', icon: User },
+    ...(isAdminOrLead ? [
+      { id: 'admin', label: 'Admin Control Panel', icon: ShieldCheck },
+      { id: 'activity', label: 'User Activity Logs', icon: Activity },
+    ] : [])
   ];
 
   return (

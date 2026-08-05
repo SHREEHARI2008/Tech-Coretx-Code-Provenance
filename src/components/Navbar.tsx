@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { User } from '../types';
-import { ShieldCheck, LogOut, Search, Bell, Sparkles, User as UserIcon, Menu, X, AlertCircle, Sun, Moon } from 'lucide-react';
+import { User, Event, Project, Opportunity, Resource } from '../types';
+import { ShieldCheck, LogOut, Search, Bell, Sparkles, User as UserIcon, Menu, X, AlertCircle, Sun, Moon, Calendar, FolderGit2, Briefcase, BookOpen, Users } from 'lucide-react';
 
 interface NavbarProps {
   user: User | null;
@@ -11,6 +11,11 @@ interface NavbarProps {
   setSearchQuery: (query: string) => void;
   darkMode?: boolean;
   setDarkMode?: React.Dispatch<React.SetStateAction<boolean>>;
+  events?: Event[];
+  projects?: Project[];
+  opportunities?: Opportunity[];
+  resources?: Resource[];
+  members?: User[];
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -22,9 +27,14 @@ export const Navbar: React.FC<NavbarProps> = ({
   setSearchQuery,
   darkMode = false,
   setDarkMode,
+  events = [],
+  projects = [],
+  opportunities = [],
+  resources = [],
+  members = [],
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [navError, setNavError] = useState<string | null>(null);
+  const [showSearchDropdown, setShowSearchDropdown] = useState(false);
 
   const handleNavClick = (tabId: string) => {
     if (tabId === 'profile' && !user) {
@@ -33,7 +43,17 @@ export const Navbar: React.FC<NavbarProps> = ({
       setActiveTab(tabId);
     }
     setMobileMenuOpen(false);
+    setShowSearchDropdown(false);
   };
+
+  // Instant Multi-category Global Search Results
+  const matchedProjects = searchQuery ? projects.filter(p => p.title.toLowerCase().includes(searchQuery.toLowerCase()) || p.domain.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 2) : [];
+  const matchedEvents = searchQuery ? events.filter(e => e.title.toLowerCase().includes(searchQuery.toLowerCase()) || e.category.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 2) : [];
+  const matchedOpps = searchQuery ? opportunities.filter(o => o.title.toLowerCase().includes(searchQuery.toLowerCase()) || o.companyOrOrg.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 2) : [];
+  const matchedRes = searchQuery ? resources.filter(r => r.title.toLowerCase().includes(searchQuery.toLowerCase()) || r.category.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 2) : [];
+  const matchedMembers = searchQuery ? members.filter(m => m.username.toLowerCase().includes(searchQuery.toLowerCase()) || m.institution.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 2) : [];
+
+  const hasAnyMatches = matchedProjects.length > 0 || matchedEvents.length > 0 || matchedOpps.length > 0 || matchedRes.length > 0 || matchedMembers.length > 0;
 
   return (
     <header className="sticky top-0 z-30 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 px-4 lg:px-8 py-4 flex items-center justify-between gap-4 shadow-sm transition-colors duration-200">
@@ -65,16 +85,114 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </div>
 
-      {/* Global Search Bar */}
+      {/* Global Search Bar with Multi-category Results Overlay */}
       <div className="hidden md:flex items-center flex-1 max-w-md mx-4 relative">
         <Search className="w-4 h-4 text-slate-400 dark:text-slate-500 absolute left-3.5 pointer-events-none" />
         <input
           type="text"
           value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search members, projects, events..."
-          className="w-full bg-slate-50 dark:bg-slate-800/80 text-slate-900 dark:text-slate-100 text-xs pl-10 pr-4 py-2 rounded-xl border border-slate-200/80 dark:border-slate-700/80 focus:bg-white dark:focus:bg-slate-800 focus:border-[#9b51e0] focus:ring-2 focus:ring-[#9b51e0]/20 outline-none transition-all"
+          onFocus={() => setShowSearchDropdown(true)}
+          onChange={(e) => {
+            setSearchQuery(e.target.value);
+            setShowSearchDropdown(true);
+          }}
+          placeholder="Search members, projects, events, opportunities..."
+          className="w-full bg-slate-50 dark:bg-slate-800/80 text-slate-900 dark:text-slate-100 text-xs pl-10 pr-8 py-2 rounded-xl border border-slate-200/80 dark:border-slate-700/80 focus:bg-white dark:focus:bg-slate-800 focus:border-[#9b51e0] focus:ring-2 focus:ring-[#9b51e0]/20 outline-none transition-all"
         />
+        {searchQuery && (
+          <button
+            onClick={() => { setSearchQuery(''); setShowSearchDropdown(false); }}
+            className="absolute right-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
+
+        {/* Global Instant Search Overlay */}
+        {showSearchDropdown && searchQuery && (
+          <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 p-3 z-50 space-y-3 max-h-[80vh] overflow-y-auto animate-scaleUp">
+            {!hasAnyMatches ? (
+              <p className="text-xs text-slate-400 p-2 text-center">No instant matches found for "{searchQuery}"</p>
+            ) : (
+              <>
+                {matchedProjects.length > 0 && (
+                  <div>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 flex items-center gap-1">
+                      <FolderGit2 className="w-3 h-3 text-purple-600" /> Projects
+                    </span>
+                    {matchedProjects.map(p => (
+                      <div
+                        key={p.id}
+                        onClick={() => handleNavClick('projects')}
+                        className="p-2 hover:bg-slate-50 dark:hover:bg-slate-800/60 rounded-xl cursor-pointer text-xs"
+                      >
+                        <p className="font-bold text-slate-900 dark:text-white truncate">{p.title}</p>
+                        <p className="text-[10px] text-slate-400">{p.domain} • By {p.authorName}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {matchedEvents.length > 0 && (
+                  <div>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 flex items-center gap-1">
+                      <Calendar className="w-3 h-3 text-indigo-600" /> Events
+                    </span>
+                    {matchedEvents.map(e => (
+                      <div
+                        key={e.id}
+                        onClick={() => handleNavClick('events')}
+                        className="p-2 hover:bg-slate-50 dark:hover:bg-slate-800/60 rounded-xl cursor-pointer text-xs"
+                      >
+                        <p className="font-bold text-slate-900 dark:text-white truncate">{e.title}</p>
+                        <p className="text-[10px] text-slate-400">{e.category} • {e.date}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {matchedOpps.length > 0 && (
+                  <div>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 flex items-center gap-1">
+                      <Briefcase className="w-3 h-3 text-emerald-600" /> Opportunities
+                    </span>
+                    {matchedOpps.map(o => (
+                      <div
+                        key={o.id}
+                        onClick={() => handleNavClick('opportunities')}
+                        className="p-2 hover:bg-slate-50 dark:hover:bg-slate-800/60 rounded-xl cursor-pointer text-xs"
+                      >
+                        <p className="font-bold text-slate-900 dark:text-white truncate">{o.title}</p>
+                        <p className="text-[10px] text-slate-400">{o.companyOrOrg} • {o.type}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {matchedMembers.length > 0 && (
+                  <div>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 flex items-center gap-1">
+                      <Users className="w-3 h-3 text-amber-600" /> Members
+                    </span>
+                    {matchedMembers.map(m => (
+                      <div
+                        key={m.id}
+                        onClick={() => handleNavClick('members')}
+                        className="p-2 hover:bg-slate-50 dark:hover:bg-slate-800/60 rounded-xl cursor-pointer text-xs flex items-center gap-2"
+                      >
+                        <img src={m.avatarUrl} alt="" className="w-5 h-5 rounded-full object-cover" />
+                        <div>
+                          <p className="font-bold text-slate-900 dark:text-white">{m.username}</p>
+                          <p className="text-[10px] text-slate-400">{m.institution}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* User Actions */}
@@ -152,13 +270,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         )}
       </div>
 
-      {/* Floating navigation error block */}
-      {navError && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-rose-50 border border-rose-200 text-rose-700 px-4 py-3 rounded-2xl text-xs font-semibold flex items-center gap-2.5 shadow-lg max-w-md w-full animate-fadeIn">
-          <AlertCircle className="w-4.5 h-4.5 text-rose-500 shrink-0" />
-          <span>{navError}</span>
-        </div>
-      )}
+
 
       {/* Mobile Navigation Drawer */}
       {mobileMenuOpen && (

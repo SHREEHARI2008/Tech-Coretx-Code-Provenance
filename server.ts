@@ -2,10 +2,9 @@ import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { initDb, saveDb } from './server/store.js';
-import { User, Event, Project, Announcement, Opportunity, Resource } from './src/types.js';
+import { User, Event, Project, Announcement, Opportunity, Resource, ActivityLog } from './src/types.js';
 
 async function startServer() {
-
   const app = express();
   const PORT = 3000;
 
@@ -17,6 +16,31 @@ async function startServer() {
 
   // Helper to sync db
   const persist = () => saveDb(db);
+
+  // Activity Audit Logger Helper
+  const recordActivity = (userId: string, username: string, userEmail: string, userRole: string, action: string, details: string) => {
+    if (!db.activityLogs) db.activityLogs = [];
+    const log: ActivityLog = {
+      id: `act_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      userId: userId || 'sys',
+      username: username || 'System',
+      userEmail: userEmail || 'system@iet.org',
+      userRole: userRole || 'member',
+      action,
+      details,
+      timestamp: new Date().toISOString()
+    };
+    db.activityLogs.unshift(log);
+    persist();
+  };
+
+  // Helper to get authenticated user
+  const getAuthUser = (req: express.Request): (User & { passwordHash: string }) | null => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return null;
+    const userId = authHeader.replace('Bearer iet_token_', '').trim();
+    return db.users.find(u => u.id === userId) || null;
+  };
 
   // --- API ROUTES ---
 
@@ -63,6 +87,8 @@ async function startServer() {
       db.users.push(newUser);
       persist();
 
+      recordActivity(newUser.id, newUser.username, newUser.email, newUser.role, 'REGISTER', `Registered new member account at ${newUser.institution}`);
+
       const { passwordHash, ...safeUser } = newUser;
       const token = `iet_token_${newUser.id}`;
 
@@ -92,6 +118,8 @@ async function startServer() {
         return res.status(401).json({ success: false, message: 'Invalid credentials. Please check your email and password.' });
       }
 
+      recordActivity(user.id, user.username, user.email, user.role, 'LOGIN', `Logged into IET Portal.`);
+
       const { passwordHash, ...safeUser } = user;
       const token = `iet_token_${user.id}`;
 
@@ -108,39 +136,23 @@ async function startServer() {
 
   // Auth: Get Current User profile
   app.get('/api/auth/me', (req, res) => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
+    const user = getAuthUser(req);
+    if (!user) {
       return res.status(401).json({ success: false, message: 'Unauthorized' });
     }
-
-    const userId = authHeader.replace('Bearer iet_token_', '').trim();
-    const user = db.users.find(u => u.id === userId);
-
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found.' });
-    }
-
     const { passwordHash, ...safeUser } = user;
     res.json({ success: true, user: safeUser });
   });
 
   // Update Profile
   app.put('/api/users/profile', (req, res) => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
+    const user = getAuthUser(req);
+    if (!user) {
       return res.status(401).json({ success: false, message: 'Unauthorized' });
     }
 
-    const userId = authHeader.replace('Bearer iet_token_', '').trim();
-    const userIndex = db.users.findIndex(u => u.id === userId);
-
-    if (userIndex === -1) {
-      return res.status(404).json({ success: false, message: 'User not found' });
-    }
-
-    const {
-      username, phone, gender, dob, city, institution, bio, skills, interests, githubUrl, linkedinUrl, avatarUrl
-    } = req.body;
+    const userIndex = db.users.findIndex(u => u.id === user.id);
+    const { username, phone, gender, dob, city, institution, bio, skills, interests, githubUrl, linkedinUrl, avatarUrl } = req.body;
 
     const existingUser = db.users[userIndex];
     const updatedUser = {
@@ -162,6 +174,8 @@ async function startServer() {
     db.users[userIndex] = updatedUser;
     persist();
 
+    recordActivity(updatedUser.id, updatedUser.username, updatedUser.email, updatedUser.role, 'UPDATE_PROFILE', 'Updated member profile details.');
+
     const { passwordHash, ...safeUser } = updatedUser;
     res.json({ success: true, user: safeUser, message: 'Profile updated successfully!' });
   });
@@ -172,12 +186,74 @@ async function startServer() {
     res.json({ success: true, members: safeMembers });
   });
 
+  // Admin: Update User Role (Promote / Demote)
+  app.put('/api/users/:id/role', (req, res) => {
+    const adminUser = getAuthUser(req);
+    if (!adminUser || (adminUser.role !== 'admin' && adminUser.role !== 'lead')) {
+      return res.status(403).json({ success: false, message: 'Admin or Chapter Lead privileges required.' });
+    }
+
+    const { id } = req.params;
+    const { role } = req.body;
+
+    if (!['member', 'lead', 'admin'].includes(role)) {
+      return res.status(400).json({ success: false, message: 'Invalid role specified.' });
+    }
+
+    const targetUserIndex = db.users.findIndex(u => u.id === id);
+    if (targetUserIndex === -1) {
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
+
+    const oldRole = db.users[targetUserIndex].role;
+    db.users[targetUserIndex].role = role;
+    persist();
+
+    recordActivity(adminUser.id, adminUser.username, adminUser.email, adminUser.role, 'ADMIN_CHANGE_ROLE', `Changed user role for ${db.users[targetUserIndex].username} (${db.users[targetUserIndex].email}) from ${oldRole} to ${role}.`);
+
+    const safeMembers = db.users.map(({ passwordHash, ...m }) => m);
+    res.json({ success: true, members: safeMembers, message: `User role updated to ${role}!` });
+  });
+
+  // Admin: Delete User
+  app.delete('/api/users/:id', (req, res) => {
+    const adminUser = getAuthUser(req);
+    if (!adminUser || (adminUser.role !== 'admin' && adminUser.role !== 'lead')) {
+      return res.status(403).json({ success: false, message: 'Admin privileges required.' });
+    }
+
+    const { id } = req.params;
+    const targetUserIndex = db.users.findIndex(u => u.id === id);
+    if (targetUserIndex === -1) {
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
+
+    const deletedUser = db.users[targetUserIndex];
+    db.users.splice(targetUserIndex, 1);
+    persist();
+
+    recordActivity(adminUser.id, adminUser.username, adminUser.email, adminUser.role, 'ADMIN_DELETE_USER', `Deleted user account ${deletedUser.username} (${deletedUser.email}).`);
+
+    const safeMembers = db.users.map(({ passwordHash, ...m }) => m);
+    res.json({ success: true, members: safeMembers, message: 'User removed successfully.' });
+  });
+
+  // Admin: Fetch Activity Logs
+  app.get('/api/admin/activity', (req, res) => {
+    const adminUser = getAuthUser(req);
+    if (!adminUser || (adminUser.role !== 'admin' && adminUser.role !== 'lead')) {
+      return res.status(403).json({ success: false, message: 'Admin privileges required.' });
+    }
+    res.json({ success: true, logs: db.activityLogs || [] });
+  });
+
   // --- EVENTS API ---
   app.get('/api/events', (_req, res) => {
     res.json({ success: true, events: db.events });
   });
 
   app.post('/api/events', (req, res) => {
+    const authUser = getAuthUser(req);
     const { title, description, category, date, time, location, isVirtual, virtualLink, speaker, speakerRole, organizer, bannerUrl, maxCapacity, tags } = req.body;
 
     if (!title || !description || !date) {
@@ -196,7 +272,7 @@ async function startServer() {
       virtualLink,
       speaker,
       speakerRole,
-      organizer: organizer || 'IET Chapter',
+      organizer: organizer || (authUser ? authUser.username : 'IET Chapter'),
       bannerUrl: bannerUrl || 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=800&auto=format&fit=crop&q=80',
       maxCapacity: Number(maxCapacity) || 100,
       registeredUserIds: [],
@@ -207,32 +283,81 @@ async function startServer() {
     db.events.unshift(newEvent);
     persist();
 
+    if (authUser) {
+      recordActivity(authUser.id, authUser.username, authUser.email, authUser.role, 'CREATE_EVENT', `Created event: "${newEvent.title}" scheduled for ${newEvent.date}`);
+    }
+
     res.status(201).json({ success: true, event: newEvent, message: 'Event created successfully!' });
+  });
+
+  app.put('/api/events/:id', (req, res) => {
+    const authUser = getAuthUser(req);
+    if (!authUser) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const { id } = req.params;
+    const eventIndex = db.events.findIndex(e => e.id === id);
+
+    if (eventIndex === -1) {
+      return res.status(404).json({ success: false, message: 'Event not found' });
+    }
+
+    db.events[eventIndex] = {
+      ...db.events[eventIndex],
+      ...req.body
+    };
+    persist();
+
+    recordActivity(authUser.id, authUser.username, authUser.email, authUser.role, 'UPDATE_EVENT', `Updated event details for "${db.events[eventIndex].title}"`);
+
+    res.json({ success: true, event: db.events[eventIndex], message: 'Event updated successfully!' });
+  });
+
+  app.delete('/api/events/:id', (req, res) => {
+    const authUser = getAuthUser(req);
+    if (!authUser) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const { id } = req.params;
+    const eventIndex = db.events.findIndex(e => e.id === id);
+
+    if (eventIndex === -1) {
+      return res.status(404).json({ success: false, message: 'Event not found' });
+    }
+
+    const deletedTitle = db.events[eventIndex].title;
+    db.events.splice(eventIndex, 1);
+    persist();
+
+    recordActivity(authUser.id, authUser.username, authUser.email, authUser.role, 'DELETE_EVENT', `Deleted event: "${deletedTitle}"`);
+
+    res.json({ success: true, message: 'Event deleted successfully.' });
   });
 
   // Toggle Event Registration
   app.post('/api/events/:id/register', (req, res) => {
-    const { id } = req.params;
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
+    const user = getAuthUser(req);
+    if (!user) {
       return res.status(401).json({ success: false, message: 'Please login to register for events.' });
     }
 
-    const userId = authHeader.replace('Bearer iet_token_', '').trim();
+    const { id } = req.params;
     const event = db.events.find(e => e.id === id);
 
     if (!event) {
       return res.status(404).json({ success: false, message: 'Event not found.' });
     }
 
-    const registeredIndex = event.registeredUserIds.indexOf(userId);
+    const registeredIndex = event.registeredUserIds.indexOf(user.id);
     let isRegistered = false;
 
     if (registeredIndex === -1) {
       if (event.registeredUserIds.length >= event.maxCapacity) {
         return res.status(400).json({ success: false, message: 'Event is at full capacity.' });
       }
-      event.registeredUserIds.push(userId);
+      event.registeredUserIds.push(user.id);
       isRegistered = true;
     } else {
       event.registeredUserIds.splice(registeredIndex, 1);
@@ -240,6 +365,8 @@ async function startServer() {
     }
 
     persist();
+
+    recordActivity(user.id, user.username, user.email, user.role, isRegistered ? 'RSVP_EVENT' : 'UNRSVP_EVENT', `${isRegistered ? 'Registered for' : 'Unregistered from'} event "${event.title}"`);
 
     res.json({
       success: true,
@@ -255,13 +382,10 @@ async function startServer() {
   });
 
   app.post('/api/projects', (req, res) => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
+    const user = getAuthUser(req);
+    if (!user) {
       return res.status(401).json({ success: false, message: 'Please login to submit projects.' });
     }
-
-    const userId = authHeader.replace('Bearer iet_token_', '').trim();
-    const user = db.users.find(u => u.id === userId);
 
     const { title, tagline, description, domain, teamMembers, githubUrl, demoUrl, tags, imageUrl } = req.body;
 
@@ -275,14 +399,14 @@ async function startServer() {
       tagline: tagline || title,
       description,
       domain: domain || 'Web Development',
-      authorId: userId,
-      authorName: user ? user.username : 'IET Member',
-      authorInstitution: user ? user.institution : 'IET Chapter',
-      teamMembers: Array.isArray(teamMembers) ? teamMembers : [user ? user.username : 'Author'],
+      authorId: user.id,
+      authorName: user.username,
+      authorInstitution: user.institution,
+      teamMembers: Array.isArray(teamMembers) ? teamMembers : [user.username],
       githubUrl,
       demoUrl,
       likes: 1,
-      likedByUserIds: [userId],
+      likedByUserIds: [user.id],
       tags: Array.isArray(tags) ? tags : ['IET', domain || 'Tech'],
       createdAt: new Date().toISOString().split('T')[0],
       imageUrl: imageUrl || 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=600&auto=format&fit=crop&q=80'
@@ -291,29 +415,85 @@ async function startServer() {
     db.projects.unshift(newProject);
     persist();
 
+    recordActivity(user.id, user.username, user.email, user.role, 'CREATE_PROJECT', `Submitted project: "${newProject.title}" (${newProject.domain})`);
+
     res.status(201).json({ success: true, project: newProject, message: 'Project submitted successfully!' });
+  });
+
+  app.put('/api/projects/:id', (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const { id } = req.params;
+    const projectIndex = db.projects.findIndex(p => p.id === id);
+
+    if (projectIndex === -1) {
+      return res.status(404).json({ success: false, message: 'Project not found' });
+    }
+
+    // Check ownership or admin privileges
+    if (db.projects[projectIndex].authorId !== user.id && user.role !== 'admin' && user.role !== 'lead') {
+      return res.status(403).json({ success: false, message: 'You can only edit your own projects.' });
+    }
+
+    db.projects[projectIndex] = {
+      ...db.projects[projectIndex],
+      ...req.body
+    };
+    persist();
+
+    recordActivity(user.id, user.username, user.email, user.role, 'UPDATE_PROJECT', `Updated project "${db.projects[projectIndex].title}"`);
+
+    res.json({ success: true, project: db.projects[projectIndex], message: 'Project updated successfully!' });
+  });
+
+  app.delete('/api/projects/:id', (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const { id } = req.params;
+    const projectIndex = db.projects.findIndex(p => p.id === id);
+
+    if (projectIndex === -1) {
+      return res.status(404).json({ success: false, message: 'Project not found' });
+    }
+
+    if (db.projects[projectIndex].authorId !== user.id && user.role !== 'admin' && user.role !== 'lead') {
+      return res.status(403).json({ success: false, message: 'You can only delete your own projects.' });
+    }
+
+    const deletedTitle = db.projects[projectIndex].title;
+    db.projects.splice(projectIndex, 1);
+    persist();
+
+    recordActivity(user.id, user.username, user.email, user.role, 'DELETE_PROJECT', `Deleted project "${deletedTitle}"`);
+
+    res.json({ success: true, message: 'Project deleted successfully.' });
   });
 
   // Toggle Project Like
   app.post('/api/projects/:id/like', (req, res) => {
-    const { id } = req.params;
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
+    const user = getAuthUser(req);
+    if (!user) {
       return res.status(401).json({ success: false, message: 'Please login to appreciate projects.' });
     }
 
-    const userId = authHeader.replace('Bearer iet_token_', '').trim();
+    const { id } = req.params;
     const project = db.projects.find(p => p.id === id);
 
     if (!project) {
       return res.status(404).json({ success: false, message: 'Project not found.' });
     }
 
-    const likedIndex = project.likedByUserIds.indexOf(userId);
+    const likedIndex = project.likedByUserIds.indexOf(user.id);
     let liked = false;
 
     if (likedIndex === -1) {
-      project.likedByUserIds.push(userId);
+      project.likedByUserIds.push(user.id);
       project.likes += 1;
       liked = true;
     } else {
@@ -324,6 +504,8 @@ async function startServer() {
 
     persist();
 
+    recordActivity(user.id, user.username, user.email, user.role, liked ? 'LIKE_PROJECT' : 'UNLIKE_PROJECT', `${liked ? 'Starred' : 'Unstarred'} project "${project.title}"`);
+
     res.json({ success: true, liked, likesCount: project.likes, project });
   });
 
@@ -332,14 +514,90 @@ async function startServer() {
     res.json({ success: true, announcements: db.announcements });
   });
 
+  app.post('/api/announcements', (req, res) => {
+    const user = getAuthUser(req);
+    if (!user || (user.role !== 'admin' && user.role !== 'lead')) {
+      return res.status(403).json({ success: false, message: 'Admin or Chapter Lead privileges required.' });
+    }
+
+    const { title, content, category, pinned } = req.body;
+    if (!title || !content) {
+      return res.status(400).json({ success: false, message: 'Title and content are required.' });
+    }
+
+    const newAnnouncement: Announcement = {
+      id: `ann_${Date.now()}`,
+      title,
+      content,
+      category: category || 'General',
+      authorName: user.username,
+      authorRole: user.role === 'admin' ? 'Executive Director' : 'Chapter Lead',
+      date: new Date().toISOString().split('T')[0],
+      pinned: Boolean(pinned)
+    };
+
+    db.announcements.unshift(newAnnouncement);
+    persist();
+
+    recordActivity(user.id, user.username, user.email, user.role, 'CREATE_ANNOUNCEMENT', `Posted announcement: "${newAnnouncement.title}"`);
+
+    res.status(201).json({ success: true, announcement: newAnnouncement, message: 'Announcement published successfully!' });
+  });
+
+  app.put('/api/announcements/:id', (req, res) => {
+    const user = getAuthUser(req);
+    if (!user || (user.role !== 'admin' && user.role !== 'lead')) {
+      return res.status(403).json({ success: false, message: 'Admin privileges required.' });
+    }
+
+    const { id } = req.params;
+    const annIndex = db.announcements.findIndex(a => a.id === id);
+
+    if (annIndex === -1) {
+      return res.status(404).json({ success: false, message: 'Announcement not found' });
+    }
+
+    db.announcements[annIndex] = {
+      ...db.announcements[annIndex],
+      ...req.body
+    };
+    persist();
+
+    recordActivity(user.id, user.username, user.email, user.role, 'UPDATE_ANNOUNCEMENT', `Updated announcement "${db.announcements[annIndex].title}"`);
+
+    res.json({ success: true, announcement: db.announcements[annIndex], message: 'Announcement updated successfully!' });
+  });
+
+  app.delete('/api/announcements/:id', (req, res) => {
+    const user = getAuthUser(req);
+    if (!user || (user.role !== 'admin' && user.role !== 'lead')) {
+      return res.status(403).json({ success: false, message: 'Admin privileges required.' });
+    }
+
+    const { id } = req.params;
+    const annIndex = db.announcements.findIndex(a => a.id === id);
+
+    if (annIndex === -1) {
+      return res.status(404).json({ success: false, message: 'Announcement not found' });
+    }
+
+    const deletedTitle = db.announcements[annIndex].title;
+    db.announcements.splice(annIndex, 1);
+    persist();
+
+    recordActivity(user.id, user.username, user.email, user.role, 'DELETE_ANNOUNCEMENT', `Deleted announcement "${deletedTitle}"`);
+
+    res.json({ success: true, message: 'Announcement deleted successfully.' });
+  });
+
   // --- OPPORTUNITIES API ---
   app.get('/api/opportunities', (_req, res) => {
     res.json({ success: true, opportunities: db.opportunities || [] });
   });
 
   app.post('/api/opportunities', (req, res) => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
+    const user = getAuthUser(req);
+    if (!user) {
       return res.status(401).json({ success: false, message: 'Please login to post opportunities.' });
     }
 
@@ -372,7 +630,55 @@ async function startServer() {
     db.opportunities.unshift(newOpportunity);
     persist();
 
+    recordActivity(user.id, user.username, user.email, user.role, 'CREATE_OPPORTUNITY', `Posted opportunity: "${newOpportunity.title}" at ${newOpportunity.companyOrOrg}`);
+
     res.status(201).json({ success: true, opportunity: newOpportunity, message: 'Opportunity posted successfully!' });
+  });
+
+  app.put('/api/opportunities/:id', (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const { id } = req.params;
+    const oppIndex = db.opportunities.findIndex(o => o.id === id);
+
+    if (oppIndex === -1) {
+      return res.status(404).json({ success: false, message: 'Opportunity not found' });
+    }
+
+    db.opportunities[oppIndex] = {
+      ...db.opportunities[oppIndex],
+      ...req.body
+    };
+    persist();
+
+    recordActivity(user.id, user.username, user.email, user.role, 'UPDATE_OPPORTUNITY', `Updated opportunity "${db.opportunities[oppIndex].title}"`);
+
+    res.json({ success: true, opportunity: db.opportunities[oppIndex], message: 'Opportunity updated successfully!' });
+  });
+
+  app.delete('/api/opportunities/:id', (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const { id } = req.params;
+    const oppIndex = db.opportunities.findIndex(o => o.id === id);
+
+    if (oppIndex === -1) {
+      return res.status(404).json({ success: false, message: 'Opportunity not found' });
+    }
+
+    const deletedTitle = db.opportunities[oppIndex].title;
+    db.opportunities.splice(oppIndex, 1);
+    persist();
+
+    recordActivity(user.id, user.username, user.email, user.role, 'DELETE_OPPORTUNITY', `Deleted opportunity "${deletedTitle}"`);
+
+    res.json({ success: true, message: 'Opportunity deleted successfully.' });
   });
 
   // --- RESOURCES API ---
@@ -381,8 +687,8 @@ async function startServer() {
   });
 
   app.post('/api/resources', (req, res) => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
+    const user = getAuthUser(req);
+    if (!user) {
       return res.status(401).json({ success: false, message: 'Please login to share learning resources.' });
     }
 
@@ -398,7 +704,7 @@ async function startServer() {
       description,
       category: category || 'Engineering & Tech',
       type: type || 'E-Book',
-      authorOrProvider: authorOrProvider || 'IET Community',
+      authorOrProvider: authorOrProvider || user.username,
       url,
       thumbnailUrl: thumbnailUrl || 'https://images.unsplash.com/photo-1532012197267-da84d127e765?w=600&auto=format&fit=crop&q=80',
       tags: Array.isArray(tags) ? tags : ['Engineering', 'IET'],
@@ -412,7 +718,55 @@ async function startServer() {
     db.resources.unshift(newResource);
     persist();
 
+    recordActivity(user.id, user.username, user.email, user.role, 'CREATE_RESOURCE', `Shared learning resource: "${newResource.title}" (${newResource.type})`);
+
     res.status(201).json({ success: true, resource: newResource, message: 'Resource shared with community!' });
+  });
+
+  app.put('/api/resources/:id', (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const { id } = req.params;
+    const resIndex = db.resources.findIndex(r => r.id === id);
+
+    if (resIndex === -1) {
+      return res.status(404).json({ success: false, message: 'Resource not found' });
+    }
+
+    db.resources[resIndex] = {
+      ...db.resources[resIndex],
+      ...req.body
+    };
+    persist();
+
+    recordActivity(user.id, user.username, user.email, user.role, 'UPDATE_RESOURCE', `Updated learning resource "${db.resources[resIndex].title}"`);
+
+    res.json({ success: true, resource: db.resources[resIndex], message: 'Resource updated successfully!' });
+  });
+
+  app.delete('/api/resources/:id', (req, res) => {
+    const user = getAuthUser(req);
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const { id } = req.params;
+    const resIndex = db.resources.findIndex(r => r.id === id);
+
+    if (resIndex === -1) {
+      return res.status(404).json({ success: false, message: 'Resource not found' });
+    }
+
+    const deletedTitle = db.resources[resIndex].title;
+    db.resources.splice(resIndex, 1);
+    persist();
+
+    recordActivity(user.id, user.username, user.email, user.role, 'DELETE_RESOURCE', `Deleted learning resource "${deletedTitle}"`);
+
+    res.json({ success: true, message: 'Resource deleted successfully.' });
   });
 
 
